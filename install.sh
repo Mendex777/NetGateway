@@ -251,8 +251,8 @@ fi
 
 # Отключаем штатный resolved
 echo -e "\e[32mОтключение systemd-resolved...\e[0m"
-sudo systemctl disable systemd-resolved
-sudo systemctl stop systemd-resolved
+sudo systemctl disable systemd-resolved > /dev/null 2>&1
+sudo systemctl stop systemd-resolved > /dev/null 2>&1
 
 # Удаляем штатный resolv.conf и создаём новый с указанием нашего dnsmasq
 echo -e "\e[32mНастройка resolv.conf...\e[0m"
