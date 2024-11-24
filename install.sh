@@ -50,6 +50,7 @@ print_purple() {
     echo -e "\e[35m$1\e[0m"
 }
 
+########################################################################################################################################################################
 # Выводим сообщение о сборе информации
 print_green "Сбор информации о системе..."
 
@@ -64,60 +65,31 @@ else
     print_yellow "Внимание: на данной версии работа скрипта не тестировалась."
 fi
 
+########################################################################################################################################################################
+# Обнуляем переменную, чтобы избежать проблем с предыдущими запусками
+SKIP_NETWORK_CONFIG=""
+
 # Получаем информацию о сетевом адаптере
 network_adapter=$(ip link show | awk -F': ' '/^[0-9]+: /{print $2}' | sed -n '2p')
+
 echo "Используемый сетевой адаптер: $network_adapter"
 
 # Получаем текущие настройки адаптера
+ip_address=$(ip addr show "$network_adapter" | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
 ip_info=$(ip addr show "$network_adapter")
+mask=$(echo "$ip_info" | grep 'inet ' | awk '{print $2}' | cut -d'/' -f2)
 gateway_info=$(ip route | grep default | awk '{print $3}')
 dns_info=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}')
 
 # Выводим информацию о текущих настройках адаптера
 echo "Настройки адаптера $network_adapter:"
-echo "IP-адрес: $(echo "$ip_info" | grep 'inet ' | awk '{print $2}')"
-echo "Маска: $(echo "$ip_info" | grep 'inet ' | awk '{print $2}' | cut -d'/' -f2)"
+echo "IP-адрес: $ip_address"
+echo "Маска: $mask"
 echo "Шлюз: $gateway_info"
 echo "DNS: $dns_info"
+echo ""
 
 ########################################################################################################################################################################
-
-
-# Функция для получения текущих настроек сети
-get_current_settings() {
-    # Получаем список всех активных интерфейсов
-    INTERFACE=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -n 1)
-
-    if [ -z "$INTERFACE" ]; then
-        echo "Нет активных сетевых интерфейсов."
-        exit 1
-    fi
-
-    # Получаем IP-адрес и маску подсети для выбранного интерфейса
-    CURRENT_IP=$(ip -o -f inet addr show $INTERFACE | awk '{print $4}' | cut -d'/' -f1)
-    CURRENT_NETMASK=$(ip -o -f inet addr show $INTERFACE | awk '{print $4}' | cut -d'/' -f2)
-
-    # Проверяем, есть ли IP-адрес
-    if [ -z "$CURRENT_IP" ]; then
-        echo "Интерфейс $INTERFACE не имеет назначенного IP-адреса."
-        exit 1
-    fi
-
-    GATEWAY=$(ip route | grep default | awk '{print $3}')
-    DNS=$(systemd-resolve --status | grep "DNS Servers" | awk '{print $3}' | head -n 1)
-}
-
-# Получение текущих настроек
-get_current_settings
-
-# Вывод текущих настроек
-echo "Текущие настройки сети:"
-echo "Интерфейс: $INTERFACE"
-echo "Текущий IP: $CURRENT_IP"
-echo "Маска подсети: $CURRENT_NETMASK"
-echo "Шлюз: $GATEWAY"
-echo "DNS: $DNS"
-echo ""
 
 # Определение файла конфигурации netplan
 CONFIG_FILE=$(ls /etc/netplan/*.yaml | head -n 1)
@@ -131,33 +103,32 @@ fi
 while true; do
     echo "Выберите вариант настройки статической адресации:"
     echo "1) Настроить статическую адресацию с текущими настройками"
-    echo "2) Настроить статическую адресацию со своими настройками"
+    echo -e "2) Настроить статическую адресацию со своими настройками \e[33m(Внимание: при смене IP-адреса на другой пропадёт доступ к сессии.)\e[0m"
     echo "3) Пропустить данный этап настройки"
 
     read -p "Введите номер варианта (1, 2 или 3): " choice
 
     case $choice in
         1)
-            STATIC_IP=$CURRENT_IP
-            NETMASK=$CURRENT_NETMASK
-            GATEWAY=$GATEWAY
-            DNS=$DNS
+            STATIC_IP=$ip_address
+            NETMASK=$mask
+            GATEWAY=$gateway_info
+            DNS=$dns_info
             break
             ;;
         2)
             read -p "Введите статический IP: " STATIC_IP
             read -p "Введите маску подсети (например, 24 для 255.255.255.0): " NETMASK
             read -p "Введите шлюз: " GATEWAY
-            read -p "Введите DNS-сервер: " DNS
+            read -p "Введите DNS-сервер (через запятую, если несколько): " DNS
             break
             ;;
         3)
-            echo "Настройка сети пропущена."
             SKIP_NETWORK_CONFIG=true
             break
             ;;
         *)
-            echo "Неверный выбор. Пожалуйста, попробуйте снова."
+            echo -e "\e[31mНеверный выбор. Пожалуйста, попробуйте снова.\e[0m"
             ;;
     esac
 done
@@ -168,24 +139,38 @@ if [ -z "$SKIP_NETWORK_CONFIG" ]; then
     sudo cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
 
     # Запись новых настроек в файл конфигурации netplan
-    echo "network:" | sudo tee "$CONFIG_FILE"
-    echo "  version: 2" | sudo tee -a "$CONFIG_FILE"
-    echo "  renderer: networkd" | sudo tee -a "$CONFIG_FILE"
-    echo "  ethernets:" | sudo tee -a "$CONFIG_FILE"
-    echo "    $INTERFACE:" | sudo tee -a "$CONFIG_FILE"
-    echo "      dhcp4: no" | sudo tee -a "$CONFIG_FILE"
-    echo "      addresses: [$STATIC_IP/$NETMASK]" | sudo tee -a "$CONFIG_FILE"
-    echo "      gateway4: $GATEWAY" | sudo tee -a "$CONFIG_FILE"
-    echo "      nameservers:" | sudo tee -a "$CONFIG_FILE"
-    echo "        addresses: [$DNS]" | sudo tee -a "$CONFIG_FILE"
+    {
+        echo "network:"
+        echo "  version: 2"
+        echo "  renderer: networkd"
+        echo "  ethernets:"
+        echo "    $network_adapter:"
+        echo "      dhcp4: no"
+        echo "      addresses: [$STATIC_IP/$NETMASK]"
+        echo "      routes:"
+        echo "        - to: 0.0.0.0/0"
+        echo "          via: $GATEWAY"
+        echo "      nameservers:"
+        echo "        addresses: [$DNS]"
+    } | sudo tee "$CONFIG_FILE" > /dev/null 2>&1
 
     # Применение новых настроек
-    sudo netplan apply
+    sudo netplan apply 2>/dev/null
 
     echo "Статическая настройка сети завершена."
+
+    # Проверка, был ли выбран вариант 2
+    if [[ "$choice" -eq 2 ]]; then
+        echo -e "\e[32mНастройка сети завершена. Скрипт завершает работу.\e[0m"
+        exit 0
+    fi
 else
-    echo "Пропускаем настройку сети."
+    echo -e "\e[32mНастройка сети пропущена.\e[0m"
 fi
+
+########################################################################################################################################################################
+########################################################################################################################################################################
+########################################################################################################################################################################
 
 # Установка и настройка dnscrypt-proxy
 sudo apt update
