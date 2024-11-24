@@ -172,9 +172,17 @@ fi
 ########################################################################################################################################################################
 ########################################################################################################################################################################
 
-# Установка и настройка dnscrypt-proxy
-sudo apt update
-sudo apt install -y dnscrypt-proxy
+# Установка dnscrypt-proxy без интерактивных диалогов и без вывода сообщений
+echo -e "\e[32mУстановка dnscrypt-proxy...\e[0m"
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y dnscrypt-proxy > /dev/null 2>&1
+
+# Проверка, установлен ли dnscrypt-proxy
+if dpkg -l | grep -q dnscrypt-proxy; then
+    echo -e "\e[32mdnscrypt-proxy установлен успешно.\e[0m"
+else
+    echo -e "\e[31mОшибка: dnscrypt-proxy не установлен.\e[0m"
+    exit 1
+fi
 
 # Заменяем старые настройки в файле конфигурации dnscrypt-proxy
 sudo sed -i "s/^listen_addresses.*/listen_addresses = ['127.0.0.53:5354']/" /etc/dnscrypt-proxy/dnscrypt-proxy.toml
@@ -184,38 +192,84 @@ sudo sed -i "s/^server_names.*/server_names = ['google', 'cloudflare', 'scaleway
 sudo sed -i "s/^ListenStream.*/ListenStream=127.0.0.53:5353/" /lib/systemd/system/dnscrypt-proxy.socket
 sudo sed -i "s/^ListenDatagram.*/ListenDatagram=127.0.0.53:5353/" /lib/systemd/system/dnscrypt-proxy.socket
 
-# Перезапускаем службу
+# Перезагрузка службы dnscrypt-proxy для применения изменений
+sudo systemctl daemon-reload
+sudo systemctl restart dnscrypt-proxy
+
+# Проверка, активна ли служба dnscrypt-proxy
+if systemctl is-active --quiet dnscrypt-proxy; then
+    echo -e "\e[32mНастройки dnscrypt-proxy обновлены, cлужба активна.\e[0m"
+else
+    echo -e "\e[31mОшибка: служба dnscrypt-proxy не активна.\e[0m"
+fi
+
+# Перезагрузка сокета dnscrypt-proxy
 sudo systemctl daemon-reload
 sudo systemctl restart dnscrypt-proxy.socket
-sudo systemctl restart dnscrypt-proxy
-sudo systemctl status dnscrypt-proxy.socket
-sudo systemctl status dnscrypt-proxy
 
-echo "Установка и настройка dnscrypt-proxy завершена."
+# Проверка, активен ли сокет dnscrypt-proxy
+if systemctl is-active --quiet dnscrypt-proxy.socket; then
+    echo -e "\e[32mСокет dnscrypt-proxy активен.\e[0m"
+else
+    echo -e "\e[31mОшибка: сокет dnscrypt-proxy не активен.\e[0m"
+fi
+########################################################################################################################################################################
+# Установка dnsmasq без интерактивных диалогов и без вывода сообщений
+echo -e "\e[32mУстановка dnsmasq...\e[0m"
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq > /dev/null 2>&1
 
-# Установка и настройка dnsmasq
-sudo apt install -y dnsmasq
-
-# После установки служба dnsmasq попытается запуститься автоматически и выдаст ошибку, это нормально.
+# Проверка, установлен ли dnsmasq
+if dpkg -l | grep -q dnsmasq; then
+    echo -e "\e[32mdnsmasq установлен успешно.\e[0m"
+else
+    echo -e "\e[31mОшибка: dnsmasq не установлен.\e[0m"
+    exit 1
+fi
 
 # Меняем конфигурацию dnsmasq
-echo "server=127.0.0.53#5354" | sudo tee -a /etc/dnsmasq.conf
+echo "server=127.0.0.53#5354" | sudo tee -a /etc/dnsmasq.conf > /dev/null 2>&1
+
+# Проверка, успешно ли добавлена строка в конфигурацию
+if grep -q "server=127.0.0.53#5354" /etc/dnsmasq.conf; then
+    echo -e "\e[32mКонфигурация dnsmasq обновлена успешно.\e[0m"
+else
+    echo -e "\e[31mОшибка: не удалось обновить конфигурацию dnsmasq.\e[0m"
+    exit 1
+fi
 
 # Скачиваем файл с доменами и сохраняем его
-sudo curl -o /etc/dnsmasq.d/domains.lst https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-dnsmasq-ipset.lst
+echo -e "\e[32mСкачивание файла с доменами...\e[0m"
+sudo curl -o /etc/dnsmasq.d/domains.lst https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-dnsmasq-ipset.lst > /dev/null 2>&1
+
+# Проверка, успешно ли скачан файл
+if [ -f /etc/dnsmasq.d/domains.lst ]; then
+    echo -e "\e[32mФайл с доменами скачан успешно.\e[0m"
+else
+    echo -e "\e[31mОшибка: файл с доменами не был скачан.\e[0m"
+    exit 1
+fi
 
 # Отключаем штатный resolved
+echo -e "\e[32mОтключение systemd-resolved...\e[0m"
 sudo systemctl disable systemd-resolved
 sudo systemctl stop systemd-resolved
 
-# В этот момент у нас на машине пропадёт доступ в интернет
-
 # Удаляем штатный resolv.conf и создаём новый с указанием нашего dnsmasq
+echo -e "\e[32mНастройка resolv.conf...\e[0m"
 sudo rm /etc/resolv.conf
-echo "nameserver 127.0.0.1" | sudo tee /etc/resolv.conf
+echo "nameserver 127.0.0.1" | sudo tee /etc/resolv.conf > /dev/null
 
-# Перезапускаем службу (теперь доступ в интернет должен появиться)
-sudo systemctl restart dnsmasq
-sudo systemctl status dnsmasq
+# Перезапускаем dnsmasq для применения изменений
+echo -e "\e[32mПерезапуск dnsmasq...\e[0m"
+sudo systemctl restart dnsmasq > /dev/null 2>&1
 
-echo "Установка и настройка dnsmasq завершена."
+# Проверка статуса dnsmasq
+echo -e "\e[32mПроверка статуса dnsmasq...\e[0m"
+if systemctl status dnsmasq | grep -q "active (running)"; then
+    echo -e "\e[32mdnsmasq работает корректно.\e[0m"
+else
+    echo -e "\e[31mОшибка: dnsmasq не работает.\e[0m"
+    exit 1
+fi
+########################################################################################################################################################################
+
