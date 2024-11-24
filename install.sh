@@ -272,4 +272,29 @@ else
     exit 1
 fi
 ########################################################################################################################################################################
+# Установка sing-box
+echo -e "\e[32mУстановка sing-box...\e[0m"
+
+# Добавляем GPG ключ
+sudo curl -fsSL https://sing-box.app/gpg.key -o /etc/apt/keyrings/sagernet.asc
+sudo chmod a+r /etc/apt/keyrings/sagernet.asc
+
+# Добавляем репозиторий
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/sagernet.asc] https://deb.sagernet.org/ * *" | \
+  sudo tee /etc/apt/sources.list.d/sagernet.list > /dev/null
+
+# Обновляем список пакетов
+sudo apt-get update > /dev/null 2>&1
+
+# Устанавливаем sing-box
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y sing-box > /dev/null 2>&1
+
+# Проверка, установлен ли sing-box
+if dpkg -l | grep -q sing-box; then
+    echo -e "\e[32msing-box установлен успешно.\e[0m"
+else
+    echo -e "\e[31mОшибка: sing-box не установлен.\e[0m"
+    exit 1
+fi
+
 
