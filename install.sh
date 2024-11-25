@@ -296,5 +296,178 @@ else
     echo -e "\e[31mОшибка: sing-box не установлен.\e[0m"
     exit 1
 fi
+########################################################################################################################################################################
+# Настройка sing-box
+echo -e "\e[32mНастройка sing-box...\e[0m"
+
+# Переменная для хранения выбора пользователя
+choice=""
+
+# Цикл для получения корректного ввода
+while true; do
+    # Предложение пользователю выбрать протокол
+    echo "Выберите протокол для настройки sing-box:"
+    echo "1) VLESS (автоматическая настройка по ссылке)"
+    echo "2) VLESS (ручная настройка)"
+    echo "3) Другой протокол или позже"
+
+    read -p "Введите номер варианта (1-3): " choice
+
+    case $choice in
+        1)
+            # Автоматическая настройка VLESS
+            read -p "Введите ссылку VLESS: " vless_link
+            echo -e "\e[32mАвтоматическая настройка VLESS по ссылке: $vless_link...\e[0m"
+            # Функция для генерации JSON
+            generate_json() {
+                local input=$1
+            
+                # Проверяем, начинается ли строка с vless://
+                if [[ $input != vless://* ]]; then
+                    echo "Ошибка: Некорректный формат строки. Она должна начинаться с 'vless://'."
+                    exit 1
+                fi
+            
+                # Убираем vless://
+                local trimmed=${input#vless://}
+            
+                # Разбираем части строки
+                local uuid=$(echo "$trimmed" | cut -d@ -f1)
+                local host_port=$(echo "$trimmed" | cut -d@ -f2 | cut -d? -f1)
+                local host=$(echo "$host_port" | cut -d: -f1)
+                local port=$(echo "$host_port" | cut -d: -f2)
+                local params=$(echo "$trimmed" | cut -d? -f2 | sed 's/#.*//')
+            
+                # Парсим параметры из query string
+                local flow=$(echo "$params" | grep -oP '(?<=flow=)[^&]*')
+                local sni=$(echo "$params" | grep -oP '(?<=sni=)[^&]*')
+                local fingerprint=$(echo "$params" | grep -oP '(?<=fp=)[^&]*')
+                local public_key=$(echo "$params" | grep -oP '(?<=pbk=)[^&]*')
+                local short_id=$(echo "$params" | grep -oP '(?<=sid=)[^&]*')
+            
+                # Генерация JSON с новой структурой
+                jq -n --arg uuid "$uuid" \
+                      --arg host "$host" \
+                      --argjson port "$port" \
+                      --arg flow "$flow" \
+                      --arg sni "$sni" \
+                      --arg fingerprint "$fingerprint" \
+                      --arg public_key "$public_key" \
+                      --arg short_id "$short_id" \
+                '{
+                    "log": {
+                      "level": "debug"
+                    },
+                    "inbounds": [
+                      {
+                        "type": "tun",
+                        "interface_name": "tun0",
+                        "domain_strategy": "ipv4_only",
+                        "inet4_address": "172.16.250.1/30",
+                        "auto_route": false,
+                        "strict_route": false,
+                        "sniff": true
+                      }
+                    ],
+                    "outbounds": [
+                      {
+                        "type": "vless",
+                        "server": $host,
+                        "server_port": $port,
+                        "uuid": $uuid,
+                        "flow": $flow,
+                        "tls": {
+                          "enabled": true,
+                          "insecure": false,
+                          "server_name": $sni,
+                          "utls": {
+                            "enabled": true,
+                            "fingerprint": $fingerprint
+                          },
+                          "reality": {
+                            "enabled": true,
+                            "public_key": $public_key,
+                            "short_id": $short_id
+                          }
+                        }
+                      }
+                    ],
+                    "route": {
+                      "auto_detect_interface": true
+                    }
+                }'
+            }
+            
+            # Сообщение пользователю
+            echo "Пожалуйста, поместите ссылку VLESS (начиная с 'vless://') и нажмите Enter:"
+            
+            # Считываем ввод от пользователя
+            read -r vless_link
+            
+            # Проверяем, ввел ли пользователь данные
+            if [[ -z "$vless_link" ]]; then
+                echo "Ошибка: Вы не ввели ссылку VLESS."
+                exit 1
+            fi
+            
+            # Генерация JSON
+            json_output=$(generate_json "$vless_link")
+            
+            # Путь к конфигурационному файлу
+            config_path="/etc/sing-box/config.json"
+            
+            # Проверяем, существует ли файл конфигурации
+            if [[ -f "$config_path" ]]; then
+                # Создаём резервную копию с временной меткой
+                backup_path="${config_path}.$(date +%Y%m%d%H%M%S).bak"
+                echo "Файл $config_path найден. Создаю резервную копию: $backup_path"
+                cp "$config_path" "$backup_path"
+            fi
+            
+            # Записываем новый JSON в файл
+            echo "$json_output" > "$config_path"
+            if [[ $? -eq 0 ]]; then
+                echo "Новый конфигурационный файл успешно записан в $config_path"
+            else
+                echo "Ошибка записи в $config_path"
+                exit 1
+            fi
+            break  # Выход из цикла
+            ;;
+        2)
+            # Ручная настройка VLESS
+            echo -e "\e[32mРучная настройка VLESS.\e[0m"
+            read -p "Введите адрес сервера: " server
+            read -p "Введите порт: " port
+            read -p "Введите UUID: " uuid
+            read -p "Введите дополнительный параметр (если есть, иначе оставьте пустым): " additional_param
+
+            echo -e "\e[32mНастройка VLESS с параметрами:\e[0m"
+            echo "Адрес сервера: $server"
+            echo "Порт: $port"
+            echo "UUID: $uuid"
+            echo "Дополнительный параметр: $additional_param"
+            
+            # Здесь можно добавить логику для создания конфигурации на основе введенных параметров
+            break  # Выход из цикла
+            ;;
+        3)
+            # Другой протокол или позже
+            echo -e "\e[33mВы выбрали другой протокол или хотите настроить позже.\e[0m"
+            echo "Инструкция: Вы можете настроить другой протокол позже, изменив конфигурацию sing-box."
+            echo "Для этого отредактируйте файл конфигурации, который обычно находится по пути /etc/sing-box/config.json."
+            break  # Выход из цикла
+            ;;
+        *)
+            echo -e "\e[31mОшибка: неверный выбор. Пожалуйста, выберите номер от 1 до 3.\e[0m"
+            # Цикл продолжится, и пользователь будет запрашиваться снова
+            ;;
+    esac
+done
+
+# Завершение скрипта
+echo -e "\e[32mНастройка завершена.\e[0m"
+
+
 
 
