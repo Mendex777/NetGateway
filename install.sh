@@ -304,7 +304,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y jq > /dev/null 2>&1
 
 # Проверка, установлен ли dnsmasq
 if dpkg -l | grep -q jq; then
-    echo -e "\e[jq установлен успешно.\e[0m"
+    echo -e "\e[32mjq установлен успешно.\e[0m"
 else
     echo -e "\e[31mОшибка: jq не установлен.\e[0m"
     exit 1
