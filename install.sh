@@ -706,6 +706,68 @@ configuring_iptables_and_ipset_routing() {
 }
 configuring_iptables_and_ipset_routing
 ########################################################################################################################################################################
+# Функция для восстановления правил iptables и маршрутизации после перезагрузки
+recovery_after_restart_vm_iptables_and_routing() {
+    # Создание файла скрипта
+    cat << 'EOF' | sudo tee /usr/local/bin/setup_vpn.sh > /dev/null
+#!/bin/bash
+
+# Создание ipset
+ipset create vpn_domains hash:net
+
+# Правила для маркировки трафика
+iptables -t mangle -A PREROUTING -m set --match-set vpn_domains dst -j MARK --set-mark 1
+iptables -t mangle -A OUTPUT -m set --match-set vpn_domains dst -j MARK --set-mark 1
+
+# Обработка всех пакетов одного соединения
+iptables -t mangle -A PREROUTING -m set --match-set vpn_domains dst -m conntrack --ctstate NEW -j MARK --set-mark 1
+iptables -t mangle -A PREROUTING -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --save-mark
+iptables -t mangle -A OUTPUT -m set --match-set vpn_domains dst -m conntrack --ctstate NEW -j MARK --set-mark 1
+iptables -t mangle -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --save-mark
+
+# Ожидание появления интерфейса tun0
+while ! ip link show tun0 > /dev/null 2>&1; do
+    sleep 1
+done
+
+# Настройка таблицы маршрутизации
+ip rule add fwmark 1 table vpn_route || echo "Failed to add rule for fwmark"
+ip route add default dev tun0 table vpn_route || echo "Failed to add route to vpn_route"
+
+# Настройка NAT
+network_adapter="ens33" # Замените на ваш интерфейс
+iptables -t nat -A POSTROUTING -o $network_adapter -j MASQUERADE
+iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+EOF
+
+    # Сделать скрипт исполняемым
+    sudo chmod +x /usr/local/bin/setup_vpn.sh
+
+    # Создание файла службы systemd
+    cat << 'EOF' | sudo tee /etc/systemd/system/setup_vpn.service > /dev/null
+[Unit]
+Description=Setup VPN Rules
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/setup_vpn.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Включение службы
+    sudo systemctl enable setup_vpn.service
+
+    echo "Скрипт и служба для восстановления правил iptables и маршрутизации после перезагрузки успешно созданы и настроены."
+}
+
+# Вызов функции
+recovery_after_restart_vm_iptables_and_routing
+
+
 ########################################################################################################################################################################
 ########################################################################################################################################################################
 
