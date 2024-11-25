@@ -410,6 +410,26 @@ sing_box_configuration_VLESS_AVTO() {
         echo "\e[31mОшибка записи в $config_path\e[0m"
         exit 1
     fi
+
+    # Перезапуск службы sing-box
+    sudo systemctl restart sing-box
+
+    # Проверка статуса службы
+    if systemctl is-active --quiet sing-box; then
+        echo -e "\e[32mСлужба sing-box успешно запущена.\e[0m"
+    else
+        echo -e "\e[31mНе удалось запустить службу sing-box.\e[0m"
+        #exit 1
+    fi
+
+    # Добавление службы в автозагрузку
+    sudo systemctl enable sing-box
+    echo -e "\e[32mСлужба sing-box добавлена в автозагрузку.\e[0m"
+
+    # Получение IP-адреса
+    IP=$(curl --interface tun0 ifconfig.me)
+    echo -e "\e[32mВаш IP-адрес VPS/VDS провайдера: $IP\e[0m"
+
 }
 
 sing_box_configuration_VLESS() {
@@ -494,6 +514,25 @@ sing_box_configuration_VLESS() {
         echo "\e[31mОшибка записи в $config_path\e[0m"
         exit 1
     fi
+
+    # Перезапуск службы sing-box
+    sudo systemctl restart sing-box
+
+    # Проверка статуса службы
+    if systemctl is-active --quiet sing-box; then
+        echo -e "\e[32mСлужба sing-box успешно запущена.\e[0m"
+    else
+        echo -e "\e[31mНе удалось запустить службу sing-box.\e[0m"
+        #exit 1
+    fi
+
+    # Добавление службы в автозагрузку
+    sudo systemctl enable sing-box
+    echo -e "\e[32mСлужба sing-box добавлена в автозагрузку.\e[0m"
+
+    # Получение IP-адреса
+    IP=$(curl --interface tun0 ifconfig.me)
+    echo -e "\e[32mВаш IP-адрес VPS/VDS провайдера: $IP\e[0m"
 }
 
 sing_box_configuration_menu() {
@@ -539,6 +578,139 @@ sing_box_configuration_menu() {
     fi
 }
 sing_box_configuration_menu
+########################################################################################################################################################################
+# Настройка маршрутизации iptables и ipset
+
+# Настройка маршрутизации iptables и ipset
+configuring_iptables_and_ipset_routing() {
+    echo "Настройка маршрутизации iptables и ipset"
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ipset > /dev/null 2>&1
+    
+    # Проверка, установлен ли ipset
+    if dpkg -l | grep -q ipset; then
+        echo -e "\e[32mipset установлен успешно.\e[0m"
+    else
+        echo -e "\e[31mОшибка: ipset не установлен.\e[0m"
+        exit 1
+    fi
+
+    # Проверка, существует ли таблица vpn_domains
+    if ! sudo ipset list | grep -q vpn_domains; then
+        # Создайте таблицу vpn_domains
+        sudo ipset create vpn_domains hash:net
+        echo -e "\e[32mТаблица vpn_domains создана.\e[0m"
+    else
+        echo -e "\e[33mТаблица vpn_domains уже существует.\e[0m"
+    fi
+
+    # Проверка существования правил для маркировки трафика
+    if ! sudo iptables -t mangle -C PREROUTING -m set --match-set vpn_domains dst -j MARK --set-mark 1 2>/dev/null; then
+        sudo iptables -t mangle -A PREROUTING -m set --match-set vpn_domains dst -j MARK --set-mark 1
+        echo -e "\e[32mПравило для PREROUTING добавлено.\e[0m"
+    else
+        echo -e "\e[33mПравило для PREROUTING уже существует.\e[0m"
+    fi
+
+    if ! sudo iptables -t mangle -C OUTPUT -m set --match-set vpn_domains dst -j MARK --set-mark 1 2>/dev/null; then
+        sudo iptables -t mangle -A OUTPUT -m set --match-set vpn_domains dst -j MARK --set-mark 1
+        echo -e "\e[32mПравило для OUTPUT добавлено.\e[0m"
+    else
+        echo -e "\e[33mПравило для OUTPUT уже существует.\e[0m"
+    fi
+
+    # Проверка существования правил для обработки всех пакетов одного соединения
+    if ! sudo iptables -t mangle -C PREROUTING -m set --match-set vpn_domains dst -m conntrack --ctstate NEW -j MARK --set-mark 1 2>/dev/null; then
+        sudo iptables -t mangle -A PREROUTING -m set --match-set vpn_domains dst -m conntrack --ctstate NEW -j MARK --set-mark 1
+        echo -e "\e[32mПравило для обработки новых соединений (PREROUTING) добавлено.\e[0m"
+    else
+        echo -e "\e[33mПравило для обработки новых соединений (PREROUTING) уже существует.\e[0m"
+    fi
+
+    if ! sudo iptables -t mangle -C PREROUTING -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --save-mark 2>/dev/null; then
+        sudo iptables -t mangle -A PREROUTING -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --save-mark
+        echo -e "\e[32mПравило для сохранения маркировки (PREROUTING) добавлено.\e[0m"
+    else
+        echo -e "\e[33mПравило для сохранения маркировки (PREROUTING) уже существует.\e[0m"
+    fi
+
+    if ! sudo iptables -t mangle -C OUTPUT -m set --match-set vpn_domains dst -m conntrack --ctstate NEW -j MARK --set-mark 1 2>/dev/null; then
+        sudo iptables -t mangle -A OUTPUT -m set --match-set vpn_domains dst -m conntrack --ctstate NEW -j MARK --set-mark 1
+        echo -e "\e[32mПравило для обработки новых соединений (OUTPUT) добавлено.\e[0m"
+    else
+        echo -e "\e[33mПравило для обработки новых соединений (OUTPUT) уже существует.\e[0m"
+    fi
+
+    if ! sudo iptables -t mangle -C OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --save-mark 2>/dev/null; then
+        sudo iptables -t mangle -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --save-mark
+        echo -e "\e[32mПравило для сохранения маркировки (OUTPUT) добавлено.\e[0m"
+    else
+        echo -e "\e[33mПравило для сохранения маркировки (OUTPUT) уже существует.\e[0m"
+    fi
+
+    # Настройте таблицу маршрутизации
+    if ! grep -q "200     vpn_route" /etc/iproute2/rt_tables; then
+        echo "200     vpn_route" | sudo tee -a /etc/iproute2/rt_tables > /dev/null
+        echo -e "\e[32mТаблица маршрутизации vpn_route добавлена.\e[0m"
+    else
+        echo -e "\e[33mТаблица маршрутизации vpn_route уже существует.\e[0m"
+    fi
+
+    # Проверка, поднят ли туннель tun0
+    if ip a show tun0 &> /dev/null; then
+        # Настройте маршруты для помеченного трафика
+        sudo ip rule add fwmark 1 table vpn_route
+        sudo ip route add default dev tun0 table vpn_route
+        echo -e "\e[32mМаршруты для помеченного трафика настроены.\e[0m"
+    else
+        echo -e "\e[31mОшибка: туннель tun0 не поднят. (Если вы пропустили конфигурацию sing-box то это нормально).\e[0m"
+        #exit 1
+    fi
+
+    # Разрешите пересылку пакетов (IP Forwarding)
+    if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+        echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf > /dev/null
+        echo -e "\e[32mПересылка пакетов включена.\e[0m"
+    else
+        echo -e "\e[33mПересылка пакетов уже включена.\e[0m"
+    fi
+
+    # (опционально) Отключение IPv6
+    for conf in "net.ipv6.conf.all.disable_ipv6 = 1" "net.ipv6.conf.default.disable_ipv6 = 1" "net.ipv6.conf.lo.disable_ipv6 = 1"; do
+        if ! grep -q "$conf" /etc/sysctl.conf; then
+            echo "$conf" | sudo tee -a /etc/sysctl.conf > /dev/null
+            echo -e "\e[32m$conf добавлено в конфигурацию.\e[0m"
+        else
+            echo -e "\e[33m$conf уже существует в конфигурации.\e[0m"
+        fi
+    done
+
+    # Применяем изменения
+    sudo sysctl -p > /dev/null
+
+    # Настройте NAT, чтобы трафик от устройств в локальной сети, использующих ваш сервер как шлюз, мог корректно маршрутизироваться
+    if ! sudo iptables -t nat -C POSTROUTING -o $network_adapter -j MASQUERADE 2>/dev/null; then
+        sudo iptables -t nat -A POSTROUTING -o $network_adapter -j MASQUERADE
+        echo -e "\e[32mПравило NAT для $network_adapter добавлено.\e[0m"
+    else
+        echo -e "\e[33mПравило NAT для $network_adapter уже существует.\e[0m"
+    fi
+
+    if ! sudo iptables -t nat -C POSTROUTING -o tun0 -j MASQUERADE 2>/dev/null; then
+        sudo iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+        echo -e "\e[32mПравило NAT для tun0 добавлено.\e[0m"
+    else
+        echo -e "\e[33mПравило NAT для tun0 уже существует.\e[0m"
+    fi
+
+    echo -e "\e[32mНастройка NAT завершена.\e[0m"
+}
+########################################################################################################################################################################
+########################################################################################################################################################################
+########################################################################################################################################################################
+
+
+
+
 
 
 
