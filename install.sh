@@ -667,7 +667,7 @@ configuring_iptables_and_ipset_routing() {
     fi
 
     # Разрешите пересылку пакетов (IP Forwarding)
-    if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+    if ! grep -q "^[^#]*net.ipv4.ip_forward=1" /etc/sysctl.conf; then
         echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf > /dev/null
         echo -e "\e[32mПересылка пакетов включена.\e[0m"
     else
